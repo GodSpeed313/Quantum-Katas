@@ -12,6 +12,117 @@ from typing import List, Callable, Optional
 from qiskit import QuantumCircuit, QuantumRegister
 
 
+class ExecutionAbortedError(Exception):
+    """Raised when execution is aborted due to excessive reality gap."""
+    pass
+
+
+class ShadowOracleValidator:
+    """
+    Shadow Oracle Validation Rule for Quantum Execution Safety
+    
+    Rule: If the Shadow Oracle (Yellow/Noisy path) predicts a Hellinger Distance > 0.20,
+    abort the Blue (QPU) execution and suggest circuit transpilation or error mitigation
+    instead of running on real hardware.
+    
+    This prevents resource waste by catching problematic circuits before they run on
+    expensive quantum hardware.
+    """
+    
+    REALITY_GAP_THRESHOLD = 0.20  # Hellinger Distance threshold
+    
+    @staticmethod
+    def validate_execution(reality_gap: float, circuit_name: str = "circuit") -> bool:
+        """
+        Validate whether a circuit should proceed to QPU execution based on reality gap.
+        
+        Args:
+            reality_gap: The Hellinger Distance between ideal and noisy simulations
+            circuit_name: Name of the circuit being validated
+            
+        Returns:
+            True if reality gap is acceptable (< threshold)
+            
+        Raises:
+            ExecutionAbortedError: If reality gap exceeds threshold
+        """
+        if reality_gap > ShadowOracleValidator.REALITY_GAP_THRESHOLD:
+            error_msg = (
+                f"\n🔴 EXECUTION ABORTED: Reality Gap Too High\n"
+                f"{'='*60}\n"
+                f"Circuit: {circuit_name}\n"
+                f"Reality Gap (Hellinger Distance): {reality_gap:.4f}\n"
+                f"Threshold: {ShadowOracleValidator.REALITY_GAP_THRESHOLD:.4f}\n"
+                f"\n❌ REASON: Noisy simulation shows {reality_gap*100:.1f}% degradation\n"
+                f"\n💡 RECOMMENDATIONS:\n"
+                f"  1. Apply Circuit Transpilation\n"
+                f"     - Optimize gate count\n"
+                f"     - Reduce CNOT depth\n"
+                f"     - Use transpile(circuit, optimization_level=3)\n\n"
+                f"  2. Implement Error Mitigation\n"
+                f"     - Zero-noise extrapolation (ZNE)\n"
+                f"     - Probabilistic error cancellation (PEC)\n"
+                f"     - Dynamical decoupling (DD)\n\n"
+                f"  3. Retry After Optimization\n"
+                f"     - Re-run validation after applying recommendations\n"
+                f"     - Check if new Reality Gap < {ShadowOracleValidator.REALITY_GAP_THRESHOLD:.4f}\n"
+                f"{'='*60}\n"
+            )
+            raise ExecutionAbortedError(error_msg)
+        
+        return True
+    
+    @staticmethod
+    def get_health_status(reality_gap: float) -> str:
+        """
+        Get a human-readable health status for a circuit.
+        
+        Args:
+            reality_gap: The Hellinger Distance
+            
+        Returns:
+            Status string with emoji and description
+        """
+        if reality_gap < 0.05:
+            return "🟢 EXCELLENT (< 5% degradation)"
+        elif reality_gap < 0.10:
+            return "🟡 GOOD (5-10% degradation)"
+        elif reality_gap < 0.20:
+            return "🟠 ACCEPTABLE (10-20% degradation)"
+        else:
+            return "🔴 CRITICAL (> 20% degradation)"
+
+
+# Decorator for automatic validation
+def require_low_reality_gap(func):
+    """
+    Decorator that validates circuit before execution.
+    
+    Requires the decorated function to return a tuple of (reality_gap, result).
+    
+    Example:
+        @require_low_reality_gap
+        def run_on_qpu(secret_string):
+            gap = calculate_reality_gap(secret_string)
+            result = execute(secret_string)
+            return gap, result
+    """
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+            if isinstance(result, tuple) and len(result) == 2:
+                reality_gap, actual_result = result
+                ShadowOracleValidator.validate_execution(
+                    reality_gap,
+                    circuit_name=func.__name__
+                )
+            return result
+        except ExecutionAbortedError as e:
+            print(str(e))
+            raise
+    return wrapper
+
+
 class Oracle:
     """Base class for quantum oracle implementations."""
     
