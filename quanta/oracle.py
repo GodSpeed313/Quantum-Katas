@@ -368,6 +368,28 @@ def create_oracle_circuit(oracle: Oracle) -> QuantumCircuit:
     return oracle.build()
 
 
+def create_bv_oracle(secret_string: str) -> QuantumCircuit:
+    """
+    Create a Bernstein-Vazirani oracle for a given secret string.
+    
+    Uses Scalability principle: automatically expands from 3-bit to 8-bit to handle higher complexity.
+    
+    Oracle Logic: Specific arrangement of CNOT gates encoding the hidden data (secret string)
+    into the quantum phase. CNOT gates implement the dot product s·x where s is the secret.
+    
+    Phase Kickback: CNOT gates in superposition mark the secret string into the quantum phase.
+    Helper Qubit (ancilla) in |-> state enables the phase-marking mechanism.
+    
+    Args:
+        secret_string: Binary string representing the secret (e.g., '101' or '11010111')
+        
+    Returns:
+        QuantumCircuit implementing the Bernstein-Vazirani oracle
+    """
+    oracle = PhaseOracleMarkingBits(secret_string)
+    return oracle.build()
+
+
 if __name__ == "__main__":
     # Example usage
     print("Oracle Implementations Examples\n")

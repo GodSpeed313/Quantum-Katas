@@ -1,14 +1,22 @@
 """
-Telemetry Module for Job Status Monitoring
+Telemetry Module for Job Status Monitoring and Reality Gap Tracking
 
-This module provides background thread monitoring of job status and queued position.
-It outputs JSON strings that can be parsed by external agents to update UI status bars.
+This module provides:
+1. Background thread monitoring of job status and queued position
+2. Reality Gap Telemetry: Track Hellinger Distance metrics across quantum executions
+3. JSON-based output for external agent integration
+
+Concepts:
+- Hellinger Distance: Mathematical metric quantifying similarity between 
+  probability distributions (ideal vs noisy quantum outputs)
+- Reality Gap: Measurable difference between ideal theoretical output and 
+  results produced by real, noisy hardware
 """
 
 import json
 import threading
 import time
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, List
 from enum import Enum
 import queue
 
@@ -218,8 +226,134 @@ class TelemetryManager:
         return self.monitors.get(job_id)
 
 
-# Global instance for easy access
+class RealityGapTracker:
+    """
+    Track Reality Gap metrics using Hellinger Distance for quantum algorithm execution.
+    
+    Reality Gap: The measurable difference between ideal theoretical output (Statevector 
+    Simulation) and results produced by real, noisy hardware.
+    
+    Hellinger Distance: A mathematical metric used to quantify the similarity between 
+    the probability distributions of two quantum outputs (ideal vs noisy).
+    """
+    
+    def __init__(self):
+        """Initialize the Reality Gap tracker."""
+        self.metrics: List[Dict[str, Any]] = []
+        self._lock = threading.Lock()
+    
+    def record_execution(self, circuit_name: str, secret_string: str, 
+                        hellinger_distance: float, ideal_result: str, 
+                        noisy_result: str, execution_safe: bool) -> None:
+        """
+        Record a quantum execution with Reality Gap metrics.
+        
+        Args:
+            circuit_name: Name of the quantum circuit (e.g., "BV_101")
+            secret_string: The hidden secret for Bernstein-Vazirani
+            hellinger_distance: The Hellinger Distance between ideal and noisy distributions
+            ideal_result: The result from Statevector Simulation
+            noisy_result: The result from noisy simulation
+            execution_safe: Whether execution passed Shadow Oracle validation
+        """
+        with self._lock:
+            metric = {
+                'timestamp': time.time(),
+                'circuit_name': circuit_name,
+                'secret_string': secret_string,
+                'hellinger_distance': hellinger_distance,
+                'ideal_result': ideal_result,
+                'noisy_result': noisy_result,
+                'execution_safe': execution_safe,
+                'health_status': self._get_health_status(hellinger_distance)
+            }
+            self.metrics.append(metric)
+    
+    @staticmethod
+    def _get_health_status(hellinger_distance: float) -> str:
+        """
+        Get health status based on Hellinger Distance.
+        
+        Args:
+            hellinger_distance: The Hellinger Distance value
+            
+        Returns:
+            Health status string with emoji indicator
+        """
+        if hellinger_distance < 0.05:
+            return "🟢 EXCELLENT (< 5% degradation)"
+        elif hellinger_distance < 0.10:
+            return "🟡 GOOD (5-10% degradation)"
+        elif hellinger_distance < 0.20:
+            return "🟠 ACCEPTABLE (10-20% degradation)"
+        else:
+            return "🔴 CRITICAL (> 20% degradation)"
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """
+        Get aggregated Reality Gap statistics.
+        
+        Returns:
+            Dictionary with min, max, average Hellinger Distance and success rate
+        """
+        with self._lock:
+            if not self.metrics:
+                return {
+                    'total_executions': 0,
+                    'successful_executions': 0,
+                    'success_rate': 0.0,
+                    'min_hellinger_distance': None,
+                    'max_hellinger_distance': None,
+                    'avg_hellinger_distance': None
+                }
+            
+            hellinger_distances = [m['hellinger_distance'] for m in self.metrics]
+            successful = sum(1 for m in self.metrics if m['execution_safe'])
+            
+            return {
+                'total_executions': len(self.metrics),
+                'successful_executions': successful,
+                'success_rate': successful / len(self.metrics) * 100,
+                'min_hellinger_distance': min(hellinger_distances),
+                'max_hellinger_distance': max(hellinger_distances),
+                'avg_hellinger_distance': sum(hellinger_distances) / len(hellinger_distances)
+            }
+    
+    def export_metrics_json(self) -> str:
+        """
+        Export all metrics as JSON string.
+        
+        Returns:
+            JSON string representation of all recorded metrics
+        """
+        with self._lock:
+            return json.dumps(self.metrics, indent=2, default=str)
+    
+    def print_summary(self) -> None:
+        """Print a formatted summary of Reality Gap metrics."""
+        stats = self.get_statistics()
+        
+        print("\n" + "="*70)
+        print("REALITY GAP TELEMETRY SUMMARY")
+        print("="*70)
+        print(f"Total Executions: {stats['total_executions']}")
+        print(f"Successful (Safe for QPU): {stats['successful_executions']}")
+        print(f"Success Rate: {stats['success_rate']:.1f}%")
+        
+        if stats['total_executions'] > 0:
+            print(f"\nHellinger Distance Stats:")
+            print(f"  Min:     {stats['min_hellinger_distance']:.4f}")
+            print(f"  Max:     {stats['max_hellinger_distance']:.4f}")
+            print(f"  Average: {stats['avg_hellinger_distance']:.4f}")
+        
+        print("="*70)
+
+
+# Global instances for easy access
 telemetry = TelemetryManager()
+
+# Global Reality Gap tracker instance
+reality_gap_telemetry = RealityGapTracker()
 
 
 if __name__ == "__main__":
